@@ -127,8 +127,11 @@ def add_shape_ok(g, y, thresh=0.30):
     Additive guard: means should move roughly linearly across genotype classes 0, 1, 2.
     Compare differences m1 - m0 and m2 - m1 and bound their relative deviation.
     """
-    m0 = y[g == 0].mean(); m1 = y[g == 1].mean(); m2 = y[g == 2].mean()
-    d01, d12 = m1 - m0, m2 - m1
+    m0 = y[g == 0].mean()
+    m1 = y[g == 1].mean()
+    m2 = y[g == 2].mean()
+    d01 = m1 - m0
+    d12 = m2 - m1
     rel_dev = abs(d12 - d01) / max(abs(d01), abs(d12), 1e-12)
     return bool(rel_dev <= thresh)
 
@@ -160,17 +163,21 @@ def rec_shape_ok(g, y, tol_equal=0.25, tol_step=0.002):
 
 def epi_corr(a, b):
     """Plain Pearson correlation with defensive centering and scaling."""
-    a = a - a.mean(); b = b - b.mean()
+    a = a - a.mean()
+    b = b - b.mean()
     return float(np.dot(a, b) / (len(a) * (a.std() + 1e-12) * (b.std() + 1e-12)))
 
 def corr(y, x):
     """Pearson correlation utility (used for observed main-effect checks)."""
-    y0 = y - y.mean(); x0 = x - x.mean()
+    y0 = y - y.mean()
+    x0 = x - x.mean()
     return float(np.dot(y0, x0) / (len(y0) * (y0.std() + 1e-12) * (x0.std() + 1e-12)))
 
 def obs_stats(y, g):
     """Return genotype counts and observed MAF for book-keeping in the manifest."""
-    n0 = int((g == 0).sum()); n1 = int((g == 1).sum()); n2 = int((g == 2).sum())
+    n0 = int((g == 0).sum())
+    n1 = int((g == 1).sum())
+    n2 = int((g == 2).sum())
     maf_obs = (n1 + 2 * n2) / (2.0 * len(g))
     return n0, n1, n2, float(maf_obs)
 
@@ -226,7 +233,8 @@ def make_recessive_snp_strict(y_std, maf, rho, rng):
 
 def resolve_epi_controls(epi_controls):
     """Merge user-provided epistasis controls with defaults."""
-    defaults = {"main_abs_cap": 0.02, "rho_tol": 0.01, "max_alpha_iters": 16, "max_resamples_per_alpha": 6}
+    defaults = {"main_abs_cap": 0.02, "rho_tol": 0.01, 
+                "max_alpha_iters": 16, "max_resamples_per_alpha": 6}
     if not epi_controls:
         return defaults
     out = dict(defaults)
@@ -304,10 +312,13 @@ def make_epistatic_pair_strict(
 
     if best is None:
         alpha = 0.05
-        u = rng.standard_normal(n); u = (u - u.mean()) / (u.std() + 1e-12)
-        e = rng.standard_normal(n); e = (e - e.mean()) / (e.std() + 1e-12)
+        u = rng.standard_normal(n)
+        u = (u - u.mean()) / (u.std() + 1e-12)
+        e = rng.standard_normal(n)
+        e = (e - e.mean()) / (e.std() + 1e-12)
         v = sign * alpha * (y * u) + np.sqrt(max(1.0 - alpha**2, 1e-8)) * e
-        u = (u - u.mean()) / (u.std() + 1e-12); v = (v - v.mean()) / (v.std() + 1e-12)
+        u = (u - u.mean()) / (u.std() + 1e-12)
+        v = (v - v.mean()) / (v.std() + 1e-12)
         gA = discretize_latent_to_genotype(u, maf_a)
         gB = discretize_latent_to_genotype(v, maf_b)
         rA = epi_corr(y, gA.astype(float))
@@ -681,7 +692,6 @@ def write_syn_vcf_aligned_to_fam(
         f.write(f"##contig=<ID={chrom}>\n")
         header = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(fam_sub["IID"]) + "\n"
         f.write(header)
-
         pos = start_pos
         for j, vid in enumerate(vids):
             f.write(f"{chrom}\t{pos}\t{vid}\tA\tC\t.\tPASS\t.\tGT")
@@ -692,73 +702,18 @@ def write_syn_vcf_aligned_to_fam(
     print(f"[OK] Wrote synthetic VCF aligned to fam: {out_vcf}")
 
 
-def load_mafs_any(path):
-    """
-    Load minor allele frequencies from .npy/.txt/.csv or PLINK outputs:
-    - .frq  (PLINK 1.9): expects column 'MAF'
-    - .afreq (PLINK 2.0): uses 'MAF' if present, else min(A1/ALT freq, 1 - that freq).
-      If ALT_FREQS exists (multi-allelic), uses the first ALT's frequency.
-    Returns a cleaned numpy array in (0, 0.5).
-    """
-    p = Path(path)
-    ext = p.suffix.lower()
-    if ext == ".npy":
-        mafs = np.load(path).astype(float)
-    elif ext in (".txt", ".csv"):
-        sep = "," if ext == ".csv" else None
-        arr = np.loadtxt(path, delimiter=sep)
-        mafs = np.asarray(arr, dtype=float)
-    elif ext == ".frq":  # PLINK 1.9
-        df = pd.read_csv(path, delim_whitespace=True)
-        if "MAF" not in df.columns:
-            raise ValueError("Expected 'MAF' column in PLINK .frq file.")
-        mafs = df["MAF"].astype(float).to_numpy()
-    elif ext == ".afreq":  # PLINK 2.0
-        # Read as-is; we'll branch on available columns/dtypes.
-        df = pd.read_csv(path, sep="\t")
-        if "MAF" in df.columns:
-            # Some PLINK2 builds emit MAF directly.
-            mafs = df["MAF"].astype(float).to_numpy()
-        elif "A1_FREQ" in df.columns:
-            # Some modes emit A1_FREQ (freq of the counted allele).
-            f = df["A1_FREQ"].astype(float).to_numpy()
-            mafs = np.minimum(f, 1.0 - f)
-        elif "ALT_FREQ" in df.columns:
-            # Biallelic: single ALT frequency as float.
-            f = df["ALT_FREQ"].astype(float).to_numpy()
-            mafs = np.minimum(f, 1.0 - f)
-        elif "ALT_FREQS" in df.columns:
-            col = df["ALT_FREQS"]
-            if np.issubdtype(col.dtype, np.number):
-                # Already numeric (biallelic case parsed as float).
-                f = col.astype(float).to_numpy()
-            else:
-                # String like "0.12,0.03,...": take the first ALT.
-                f = (
-                    col.astype(str)
-                       .str.split(",", n=1, expand=True)
-                       .iloc[:, 0]
-                       .astype(float)
-                       .to_numpy()
-                )
-            mafs = np.minimum(f, 1.0 - f)
-        else:
-            raise ValueError(
-                "Could not find MAF/A1_FREQ/ALT_FREQ/ALT_FREQS in .afreq file."
-            )
-    else:
-        raise ValueError(f"Unsupported MAF file type: {ext}")
+def load_allele_freqs(path):
+    """Load allele frequencies from PLINK2 .afreq file"""
+    df = pd.read_csv(path, sep="\t")
+    afreq = df["A1_FREQ"].astype(float).to_numpy()
+    mafs = np.minimum(afreq, 1.0 - afreq)
     mafs = mafs[np.isfinite(mafs)]
     mafs = mafs[(mafs > 0.0) & (mafs < 0.5)]
-    if mafs.size == 0:
-        raise ValueError("No valid MAF values found after cleaning.")
     return mafs
-
-# ------------------------------ config path --------------------------------
 
 def validate_config(cfg):
     """
-    validation and normalization.
+    Validate and normalize spike-in config dict
     - Ensures required keys exist.
     - Backfills defaults if not provided.
     - Normalizes structures to the shapes expected by the generator.
@@ -845,7 +800,7 @@ def main():
 
     # Required inputs (always present now)
     phenos_path = cfg["inputs"]["phenotypes"]
-    pheno_col   = cfg["inputs"]["pheno_col"]
+    pheno_col = cfg["inputs"]["pheno_col"]
     plink_prefix = cfg["inputs"]["genotypes"]
 
     # y, IIDs aligned to .fam (subset to samples with non-missing y)
@@ -858,7 +813,7 @@ def main():
     # precomputed MAFs (optional): allow .afreq/.frq/.npy/.csv/.txt
     real_mafs = None
     if cfg["inputs"].get("real_mafs_path"):
-        real_mafs = load_mafs_any(cfg["inputs"]["real_mafs_path"])
+        real_mafs = load_allele_freqs(cfg["inputs"]["real_mafs_path"])
     
     # build out_prefix
     out_prefix = build_out_prefix(cfg["outputs"], cfg["meta"], cfg["design"])
