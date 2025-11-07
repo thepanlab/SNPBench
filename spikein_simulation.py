@@ -55,8 +55,6 @@ import pandas as pd
 from scipy.stats import norm
 import yaml  # PyYAML
 
-# ------------------------------ basic checks ------------------------------
-
 def check_y_is_standardized(y, tol=5e-2):
     """Warn if y deviates from about N(0,1). We do not modify y; this only flags scale issues."""
     m, s = float(y.mean()), float(y.std())
@@ -67,8 +65,7 @@ def check_y_is_standardized(y, tol=5e-2):
             file=sys.stderr,
         )
 
-# ------------------------------ MAF utilities -----------------------------
-
+# MAF utilities
 def sample_maf_in_range(real_mafs, low, high, rng):
     """
     Draw a MAF in [low, high].
@@ -93,8 +90,7 @@ def draw_add_maf(real_mafs, n_samples, rng, n22_min=1000, p_min=None, max_tries=
             return p
     return float(np.clip(np.median(real_mafs) if real_mafs is not None else 0.10, p_min, 0.49))
 
-# ------------------------------ discretization ----------------------------
-
+# Discretization
 def hwe_thresholds_for_maf(p):
     """Compute latent-N(0,1) thresholds that yield HWE genotype probs for target MAF p."""
     t0 = norm.ppf((1.0 - p) ** 2)
@@ -120,8 +116,7 @@ def correlate_with_target(y_std, rho, rng):
     z = rho * y + np.sqrt(max(1e-8, 1 - rho**2)) * e
     return (z - z.mean()) / (z.std() + 1e-12)
 
-# ------------------------------ shape guards ------------------------------
-
+# Shape guards
 def add_shape_ok(g, y, thresh=0.30):
     """
     Additive guard: means should move roughly linearly across genotype classes 0, 1, 2.
@@ -189,8 +184,7 @@ def hom_alt_frac(n2, n):
     """P(g==2) under the realized sample—useful for recessive sanity checks."""
     return n2 / float(max(1, n))
 
-# ------------------------------ builders ---------------------------------
-
+# SNP Builders (per effect type)
 def make_dominant_snp_strict(y_std, maf, rho, rng):
     """
     Build g so that C = 1[g>0] has correlation approximately equal to rho with y, while among carriers
@@ -333,7 +327,6 @@ def make_epistatic_pair_strict(
 # ------------------------------ 
 #  Main Sim Generator 
 # ------------------------------
-
 def generate_synthetic_variants(
     y_std,
     n_add=100,
@@ -542,7 +535,7 @@ def generate_synthetic_variants(
     manifest = pd.DataFrame(rows)
     return syn_X, manifest
 
-# ------------------------------ I/O helpers -------------------------------
+# I/O helpers
 def read_table_auto(path):
     """
     1) try whitespace-delimited (works for space or tab),
@@ -787,8 +780,7 @@ def build_out_prefix(outputs, meta, design):
         Path(out_prefix).parent.mkdir(parents=True, exist_ok=True)
     return out_prefix
 
-# ------------------------------ CLI --------------------------------------
-
+# CLI
 def main():
     ap = argparse.ArgumentParser(description="Synthetic SNP spike-in simulator (config-driven).")
     ap.add_argument("--config", required=True, help="Path to spikein_config.yml")
