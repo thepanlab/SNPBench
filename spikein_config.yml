@@ -1,0 +1,54 @@
+meta:
+  mode: "s6"
+  seed: 42
+  rng_seed: 42
+
+inputs:
+  phenotypes: "./data/height_adj.pheno"
+  pheno_col: "height_adj_z"
+  genotypes: "./data/ukb_c1-22_qc"
+  real_mafs_path: "./data/maf_train_rs1234.afreq"
+
+design:
+  n_add: 100
+  n_nonlin: 300
+  nonlin_design:
+    dominant: 100
+    recessive: 100
+    epistatic: 50   # 2 columns per pair => 100 epistatic variants total
+
+ranges:
+  add_rho_range: [0.025, 0.055]
+  dom_rho_range: [0.018, 0.030]
+  rec_rho_range: [0.035, 0.065]
+  epi_rho_range: [0.045, 0.070]
+
+  maf_ranges:
+    dominant:  [0.050, 0.080]
+    recessive: [0.060, 0.120]
+    epistatic: [0.080, 0.200]
+
+controls:
+  additive:
+    add_min_n22: 1500
+    add_dev_max: 0.20
+    add_max_tries: 20
+  dominant:
+    min_max_dom_carrier_frac: [0.10, 0.14]
+    dom_shape_max_tries: 40
+  recessive:
+    min_max_rec_hom_n: [1200, 4500]
+    rec_shape_max_tries: 40
+  epistatic:
+    main_abs_cap: 0.010
+    rho_tol: 0.004
+    max_alpha_iters: 16
+    max_resamples_per_alpha: 8
+
+outputs:
+  out_root: "./data/spikein" # or provide out_prefix instead
+  write_csv: true
+  write_vcf: true
+  vcf_chrom: "26"
+  vcf_start: 1000000
+  vcf_step: 10
