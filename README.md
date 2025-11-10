@@ -1,3 +1,4 @@
+# Benchmarking interpretability of deep learning for predictive genomics: recall, precision, and variability of feature attribution
 
 ## Conda environments
 
@@ -9,7 +10,6 @@ conda config --add channels bioconda
 # create plink environment
 conda create -n plink
 conda install -c bioconda plink plink2
-
 # activate plink environment for plink step(s)
 conda activate plink
 ```
@@ -29,7 +29,6 @@ conda install pytorch-gpu torchvision
 conda install pytorch-gpu torchvision
 # install captum for interpretation
 conda install captum
-
 # activate python environment
 conda activate pyukb
 ```
@@ -162,7 +161,7 @@ design:
   nonlin_design:
     dominant: 100
     recessive: 100
-    epistatic: 50   # 2 columns per pair => 100 epistatic columns total
+    epistatic: 50   # 2 columns per pair -> 100 epistatic columns total
 
 ranges:
   add_rho_range: [0.025, 0.055]
@@ -171,9 +170,9 @@ ranges:
   epi_rho_range: [0.045, 0.070]
 
   maf_ranges:
-    dominant:  [0.050, 0.080]  # carriers ~= 1 - (1-p)^2 -> about 9.8–14.8%
-    recessive: [0.060, 0.120]  # n22 ~= p^2 * N -> about 1150–4600 at N~3.2e5
-    epistatic: [0.080, 0.200]  # dense joint table, few sparse cells
+    dominant:  [0.050, 0.080]
+    recessive: [0.060, 0.120]
+    epistatic: [0.080, 0.200]
 
 controls:
   additive:
@@ -246,12 +245,119 @@ plink --bfile ./data/ukb_c1-22_qc \
       --out ./data/spikein/spikein_s6_add100_dom100_rec100_epi100_seed42/ukb_c1-22_qc_simset.real_plus_syn
 ```
 
+Run GWAS on real + simulated variants
+
+```bash
+plink2 \
+  --bfile ./spikein/spikein_s6_add100_dom100_rec100_epi100_seed42/ukb_c1-22_qc_simset.real_plus_syn \
+  --glm allow-no-covars hide-covar \
+  --variance-standardize \
+  --keep ./data/train_rs1234.id
+  --pheno ./data/height_adj.pheno \
+  --pheno-name height_adj_z \
+  --no-input-missing-phenotype
+  --out ./data/spikein/spikein_s6_add100_dom100_rec100_epi100_seed42/gwas_real_plus_syn \
+```
+
 ## DNN Training
 
-- `ukb_data.py` for data management
+Feed forward multilayer perceptrons (DNNs) are trained in three scenarios depending on the target interpretation task:
 
+1. Train with the real + simulated genotypes for attribution recall benchmarking.
+2. Train with the real + decoy genotypes for attribution precision benchmarking.
+3. Train an ensemble of models for ensemble stability benchmarking. 
 
-## DNN Interpretation
+Data location, hyperparameters, and other settings are specified in the `config.yaml` file found in the directory where trained models and other results will be stored. An example configuration file is shown below. 
 
+```yaml
+# config.yaml located in model_dir
+task_type: "regression" # task type (used for determining metrics to evaluate during training)
+verbose: true # logs additional information during training run when true
+seed: 42 # global seed
+model_dir: "./experiments_qc1/dnn_spikein" # directory where config.yml is stored
+ref_allele: "a0" # specify allele "a0" for appropriate genotype encoding with pandas-plink
+# bim/fam/bed PLINK genotypes fileset
+genotypes: "./data/spikein/spikein_s6_add100_dom100_rec100_epi100_seed42/ukb_c1-22_qc_simset.real_plus_syn"
+phenotype_path: "./data/height_adj.pheno" # phenotype labels file
+phenotype_name: "height_adj_z" # phenotype labels column header (column in phenotype_path)
+qc_snplist_path: null # path to list of SNPs to use for training 
+qc_idlist_path: "./data/ukb_c1-22_qc.id" # set of all sample IDs to consider (from PLINK)
+train_ids_path: "./data/train_rs1234.id" # train IDs path
+val_ids_path: "./data/val_rs1234.id" # val IDs path
+test_ids_path: "./data/test_rs1234.id" # test IDs path
+use_decoys: false # flag controlling whether to train with decoys or not.
+decoy_seed: null # int decoy seed (must use with decoy model training)
+model_name: "VanillaNet" # name of model class
+use_x_transforms: false # x data transformation
+use_y_transforms: false # y data transformation
+missing_policy: null # determines how to handle missing X data
+batch_size: 128 # batch size
+optimizer: "adam" # optimizer [adamw | adam | sgd]
+loss_function: "mae" # loss function [mse | mae | bce]
+activation_function: 'relu'  # relu | leakyrelu | silu | gelu | elu | selu | none
+learning_rate: 1e-6 # learning rate
+num_epochs: 100 # number of epochs for training
+l2_lambda: 0.001 # l2 regularization factor
+l1_lambda: 0.0 # l1 regularization factor
+dropout_rate: 0.25 # dropout rate
+grad_clip: null # gradient clipping value (no gradient clipping when null)
+# DNN hidden layers units
+hidden_layers:
+- 1000
+- 200
+- 50
+rows_per_chunk: 20480 # number of rows per dask chunk
+cols_per_chunk: 20480 # number of cols per dask chunk
+num_workers: 0
+precision: 'fp32' # amp_fp16 | amp_bf16 | fp32
+es_enabled: false # early stopping enabled
+es_patience: 25 # early stopping patience
+es_min_delta: 0.0 # early stopping min improvement
+es_min_epochs: 50 # min epochs before considering early stopping
+es_mode: "max" # min | max
+torch_compile: false # whether to use torch.compile()
+torch_compile_mode: null # default | reduce-overhead | max-autotune
+monitor_metric: "r2" # the metric to monitor during training (on validation set)
+save_summary_steps: 10 # controls the frequency in which training metrics are stored 
+restore_file: null # resume training from checkpoint file
+```
+
+- For models used to evaluate attribution recall, make sure the `genotypes` key is assigned to the real + spike-in synthetic genotype data path. 
+- For models used to evaluate attribution precision, make sure that `use_decoys` is set to true and a `decoy_seed` value is provided. Use the the path to the true genotypes (after QC). Decoy genotypes are generated on-the-fly.
+- For models used to evaluate stability/consistency, create a config file for each ensemble model (one model per config file; each config file should be in its own unique model directory).
+
+Training is executed with `train.py` with the path to the model containing the experiment's configuration file specified with the `--model_dir` argument.
+
+```bash
+$ python3 -u train.py --model_dir ./experiments/dnn_spikein
+```
+
+To run it in the background (i.e., maintain training in the event of lost connection):
+
+```bash
+$ nohup python3 -u train.py --model_dir ./experiments/dnn_spikein &
+```
+
+## Generating Attributions or Feature Importance Scores
+
+Run `interpretation.py` to generate SNP-wise feature importance scores across several interpretation algorithms (Saliency, Gradient SHAP, DeepLIFT, Integrated Gradients) in both the presence and absence of smoothing via SmoothGrad. Importance scores are generated and aggregated from only the samples found in the testing set. 
+
+```bash
+$ python3 -u attribution.py --model_dir ./experiments/dnn_spikein
+```
 
 ## Interpretation Benchmarking
+
+Each benchmarking notebook produces both quantitative metrics and visual summaries of the interpretation benchmarks.
+
+- **Attribution Recall** (`benchmark_recall.ipynb`)
+  - Measures the ability of each interpretation method to recover known causal (spike-in) SNPs.
+  - Evaluates recall across effect types (additive, dominant, recessive, epistatic).
+  - Line plots compare recall variability between smoothed and non-smoothed methods across quantiles.
+- **Attribution Precision** (`benchmark_precision.ipynb`)\
+  - Computes precision by measuring the ability to distinguish real SNPs from decoys.
+  - Line plot compares precision variability for smoothed vs. non-smoothed methods across quantiles.
+- **Ensemble Stability** (`benchmark_stability.ipynb`)
+  - Quantifies consistency of feature attributions across independently trained ensemble members.
+  - Computes per-SNP relative standard deviation (RSD) of attribution scores; median RSD summarizes stability, and median absolute deviation captures dispersion.
+  - Violin plots illustrate stability distributions across interpretation methods.
